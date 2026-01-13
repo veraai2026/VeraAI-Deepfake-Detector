@@ -1,0 +1,162 @@
+import streamlit as st
+import tensorflow as tf
+from PIL import Image, ImageOps
+import numpy as np
+import datetime
+import uuid
+import os
+import base64 # यह नया टूल है इमेज को कोड बनाने के लिए
+
+# --- 1. पेज सेटअप ---
+st.set_page_config(page_title="Vera AI Forensic Analysis", page_icon="🛡️", layout="centered")
+
+# --- 2. इमेज को Base64 में बदलने का फंक्शन ---
+def get_base64_image(image_path):
+    with open(image_path, "rb") as img_file:
+        return base64.b64encode(img_file.read()).decode()
+
+# लोगो लोड करना (अगर फाइल है तो)
+logo_base64 = ""
+if os.path.exists("logo.jpg"):
+    logo_base64 = get_base64_image("logo.jpg")
+else:
+    st.warning("⚠️ logo.jpg नहीं मिली! डिफ़ॉल्ट शील्ड का उपयोग होगा।")
+
+# --- 3. CSS (अब हम Base64 यूज़ करेंगे) ---
+st.markdown(f"""
+<style>
+.main {{ background-color: #0e1117; }}
+.report-paper {{
+    background-color: white;
+    padding: 40px;
+    border: 2px solid #000;
+    font-family: 'Courier New', Courier, monospace;
+    color: black;
+    position: relative;
+    overflow: hidden;
+}}
+/* वाटरमार्क लेयर - Base64 का जादू */
+.watermark-layer {{
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    /* यहाँ हमने सीधे कोड डाला है */
+    background-image: url("data:image/jpeg;base64,{logo_base64}");
+    background-repeat: no-repeat; 
+    background-position: center; 
+    background-size: 50%;
+    opacity: 0.15; /* हल्का सा दिखेगा */
+    z-index: 0;
+}}
+.content-layer {{ position: relative; z-index: 1; }}
+.stButton>button {{ 
+    width: 100%; border-radius: 5px; height: 4em; 
+    background-color: #0066cc; color: white; font-weight: bold; border: none;
+}}
+.status-box-real {{ border: 2px solid green; background-color: rgba(230, 255, 230, 0.9); padding: 15px; text-align: center; margin-top: 20px; }}
+.status-box-fake {{ border: 2px solid red; background-color: rgba(255, 230, 230, 0.9); padding: 15px; text-align: center; margin-top: 20px; }}
+.info-table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+.info-table td {{ padding: 8px; border-bottom: 1px solid #ddd; }}
+.label-cell {{ font-weight: bold; width: 40%; color: #333; }}
+.value-cell {{ font-weight: bold; color: #000; }}
+</style>
+""", unsafe_allow_html=True)
+
+# हेडर
+st.markdown("<h1 style='text-align: center; color: white;'>🛡️ Vera AI Forensic Analysis</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: gray;'>Official Deepfake Detection Lab</p>", unsafe_allow_html=True)
+
+@st.cache_resource
+def load_model():
+    return tf.keras.models.load_model('vera_model_v2_beta.h5')
+
+try:
+    model = load_model()
+except:
+    st.error("Error: vera_model_v2_beta.h5 not found.")
+    st.stop()
+
+# --- इनपुट ---
+col1, col2 = st.columns(2)
+with col1:
+    client_name = st.text_input("Client Name (Required)", placeholder="Ex: Ravi Kumar")
+with col2:
+    case_ref = st.text_input("Case Reference", placeholder="Ex: FIR-2026/01")
+
+uploaded_file = st.file_uploader("Upload Evidence", type=["jpg", "png", "jpeg"])
+
+if uploaded_file is not None:
+    image = Image.open(uploaded_file)
+    st.image(image, caption='Evidence Preview', width=300)
+    
+    size = (256, 256)
+    image_resized = ImageOps.fit(image, size, Image.LANCZOS)
+    img_array = np.array(image_resized).astype(np.float32) / 255.0
+    img_array = np.expand_dims(img_array, axis=0)
+
+    st.write("")
+    if st.button('🛡️ GENERATE FORENSIC REPORT'):
+        if not client_name:
+            st.error("⚠ Please enter Client Name.")
+        else:
+            with st.spinner('Analyzing...'):
+                prediction = model.predict(img_array)
+                score = prediction[0][0]
+                
+                report_id = "VAI-" + str(uuid.uuid4())[:8].upper()
+                scan_time = datetime.datetime.now().strftime("%d-%m-%Y | %H:%M")
+                
+                if score > 0.5:
+                    st.balloons()
+                    status_text = "AUTHENTIC / REAL"
+                    status_color = "green"
+                    box_class = "status-box-real"
+                    confidence = score * 100
+                    risk = "LOW RISK"
+                    reason = "Natural sensor noise and lighting physics observed."
+                else:
+                    status_text = "DEEPFAKE DETECTED"
+                    status_color = "red"
+                    box_class = "status-box-fake"
+                    confidence = (1 - score) * 100
+                    risk = "CRITICAL HIGH RISK"
+                    reason = "Artificial artifacts and GAN generation traces found."
+
+                # --- HTML REPORT ---
+                report_html = f"""
+<div class="report-paper">
+<div class="watermark-layer"></div>
+<div class="content-layer">
+<div style="text-align: center;">
+<img src="data:image/jpeg;base64,{logo_base64}" style="width: 100px; margin-bottom: 10px;">
+<h3 style="margin: 0; color: #002D62; text-decoration: underline;">FORENSIC AUDIT REPORT</h3>
+</div>
+<div style="font-size: 18px; font-weight: bold; color: #002D62; margin-top: 10px; border-bottom: 2px solid #ccc;">
+REPORT FOR: {client_name.upper()}
+</div>
+<table class="info-table">
+<tr><td class="label-cell">REPORT ID:</td><td class="value-cell">{report_id}</td></tr>
+<tr><td class="label-cell">CASE REF:</td><td class="value-cell">{case_ref if case_ref else "N/A"}</td></tr>
+<tr><td class="label-cell">DATE:</td><td class="value-cell">{scan_time}</td></tr>
+<tr><td class="label-cell">FILE:</td><td class="value-cell">{uploaded_file.name}</td></tr>
+</table>
+<div class="{box_class}">
+<h2 style="margin:0; color: {status_color};">{status_text}</h2>
+<p style="margin:5px 0 0 0;">CONFIDENCE: {confidence:.2f}%</p>
+</div>
+<p style="margin-top: 20px; font-weight: bold;">FORENSIC ANALYSIS:</p>
+<p style="font-size: 14px; background-color: rgba(249,249,249,0.9); padding: 10px; border-left: 3px solid #333;">
+{reason}<br>Risk Assessment: <b>{risk}</b>
+</p>
+<br><hr>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+<div style="font-size: 12px; color: gray;">
+Report Issued By:<br><b>Vera AI Forensic Analysis</b><br><i>Digital Verification Unit</i>
+</div>
+<div style="border: 2px solid red; color: red; border-radius: 50%; width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; transform: rotate(-15deg); font-weight: bold; font-size: 12px; border-style: double; background-color: rgba(255,255,255,0.8);">
+OFFICIAL<br>VERIFIED
+</div>
+</div>
+</div>
+</div>
+"""
+                st.markdown(report_html, unsafe_allow_html=True)
+
